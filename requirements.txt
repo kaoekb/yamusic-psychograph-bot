@@ -1,0 +1,5 @@
+aiogram==3.12.0
+yandex-music==2.1.1
+python-dotenv==1.0.1
+openai>=1.0.0
+PySocks==1.7.1

@@ -1,0 +1,54 @@
+services:
+  socks:
+    image: alpine:3.20
+    container_name: ru-socks-tunnel
+    restart: unless-stopped
+    environment:
+      SSH_ADDR: "${SSH_ADDR}"   # root@ru.pigeon-vpn.ru
+      SSH_PORT: "${SSH_PORT}"   # 122
+    volumes:
+      - ./ssh/id_ru_tunnel:/root/.ssh/id_rsa:ro
+    command:
+      - sh
+      - -lc
+      - |
+        apk add --no-cache openssh-client &&
+        exec ssh -N \
+          -o ServerAliveInterval=30 \
+          -o ServerAliveCountMax=3 \
+          -o ExitOnForwardFailure=yes \
+          -o StrictHostKeyChecking=no \
+          -o UserKnownHostsFile=/dev/null \
+          -i /root/.ssh/id_rsa \
+          -p ${SSH_PORT} \
+          -D 0.0.0.0:9050 \
+          ${SSH_ADDR}
+
+  bot:
+    image: python:3.11-slim
+    container_name: yamusic-psychograph-bot
+    restart: unless-stopped
+    depends_on:
+      - socks
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - ./data:/app/data
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MODEL: ${MODEL:-gpt-4o-mini}
+      MAX_TRACKS: ${MAX_TRACKS:-120}
+      YM_PROXY_HTTP: socks5h://socks:9050
+      YM_PROXY_HTTPS: socks5h://socks:9050
+      YM_TIMEOUT: ${YM_TIMEOUT:-15}
+      YM_RETRIES: ${YM_RETRIES:-3}
+      YM_BACKOFF: ${YM_BACKOFF:-0.5}
+      SQLITE_PATH: /app/data/bot.sqlite3
+      ADMIN_IDS: ${ADMIN_IDS}
+    command:
+      - bash
+      - -lc
+      - |
+        pip install --no-cache-dir -r requirements.txt &&
+        python bot.py
