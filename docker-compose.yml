@@ -4,8 +4,8 @@ services:
     container_name: ru-socks-tunnel
     restart: unless-stopped
     environment:
-      SSH_ADDR: "${SSH_ADDR}"   # root@ru.pigeon-vpn.ru
-      SSH_PORT: "${SSH_PORT}"   # 122
+      SSH_ADDR: "${SSH_ADDR}"   # root@home.kiselev.cz
+      SSH_PORT: "${SSH_PORT}"   # 902
     volumes:
       - ./ssh/id_ru_tunnel:/root/.ssh/id_rsa:ro
     command:

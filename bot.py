@@ -37,9 +37,9 @@ ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split("
 from handlers.help import router as help_router
 from handlers.ads  import router as ads_router
 
-# SOCKS-прокси для Яндекс Музыки (внутри docker-compose это socks:9050)
-YM_PROXY_HTTP = os.getenv("YM_PROXY_HTTP", "").strip()   # напр. socks5h://socks:9050
-YM_PROXY_HTTPS = os.getenv("YM_PROXY_HTTPS", "").strip() # напр. socks5h://socks:9050
+# SOCKS-прокси для Яндекс Музыки
+YM_PROXY_HTTP = os.getenv("YM_PROXY_HTTP", "").strip()   # напр. socks5h://127.0.0.1:9050
+YM_PROXY_HTTPS = os.getenv("YM_PROXY_HTTPS", "").strip() # напр. socks5h://127.0.0.1:9050
 
 # Таймауты/ретраи для ЯМ (используются библиотекой requests внутри yandex_music)
 YM_TIMEOUT = float(os.getenv("YM_TIMEOUT", "15"))
@@ -139,7 +139,7 @@ def fetch_tracks(user: str, kind: int) -> List[Tuple[str, str]]:
     """
     Возвращает ВСЕ треки [(artist, title), ...] из плейлиста.
     На время запросов к ЯМ принудительно включаем HTTP(S)_PROXY на основе YM_PROXY_*,
-    чтобы любой внутренний requests шёл через SOCKS (RUS IP).
+    чтобы любой внутренний requests шёл через SOCKS-туннель.
     """
     last_err = None
 
@@ -175,7 +175,7 @@ def fetch_tracks(user: str, kind: int) -> List[Tuple[str, str]]:
                 if "Unavailable For Legal Reasons" in msg or "451" in msg:
                     last_err = RuntimeError(
                         "Яндекс вернул 451 (гео-ограничения). "
-                        "Проверьте, что SOCKS-прокси действительно российский и доступен из контейнера (socks:9050)."
+                        "Проверьте, что SOCKS-туннель доступен и YM_PROXY_HTTP/YM_PROXY_HTTPS настроены корректно."
                     )
                     break
                 last_err = e
