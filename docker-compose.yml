@@ -7,12 +7,25 @@ services:
       SSH_ADDR: "${SSH_ADDR}"   # root@home.kiselev.cz
       SSH_PORT: "${SSH_PORT}"   # 902
     volumes:
-      - ./ssh/id_ru_tunnel:/root/.ssh/id_rsa:ro
+      - type: bind
+        source: ${SSH_KEY_PATH:-./ssh/id_ru_tunnel}
+        target: /run/ssh/id_rsa_src
+        read_only: true
+        bind:
+          create_host_path: false
     command:
       - sh
       - -lc
       - |
+        set -eu &&
         apk add --no-cache openssh-client &&
+        install -d -m 700 /root/.ssh &&
+        if [ ! -f "/run/ssh/id_rsa_src" ]; then
+          echo "SSH key source /run/ssh/id_rsa_src not found or is not a regular file." >&2
+          echo "Set SSH_KEY_PATH to an existing private key file on the host." >&2
+          exit 1
+        fi &&
+        install -m 600 /run/ssh/id_rsa_src /root/.ssh/id_rsa &&
         exec ssh -N \
           -o ServerAliveInterval=30 \
           -o ServerAliveCountMax=3 \
