@@ -37,7 +37,7 @@ MODEL = os.getenv("MODEL", "").strip() or None
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x.isdigit()}
 
 from handlers.help import router as help_router
-from handlers.ads  import router as ads_router
+from handlers.ads import router as ads_router, build_ad_message
 
 # SOCKS-прокси для Яндекс Музыки
 YM_PROXY_HTTP = os.getenv("YM_PROXY_HTTP", "").strip()   # напр. socks5h://127.0.0.1:9050
@@ -66,6 +66,12 @@ BIG_FIVE_TRAITS = [
     "extraversion",
     "agreeableness",
     "neuroticism",
+]
+
+ATTRIBUTE_DIMENSIONS = [
+    "arousal",
+    "valence",
+    "depth",
 ]
 
 BIG_FIVE_LABELS = {
@@ -441,6 +447,28 @@ def normalize_trait_report(raw_trait: Any, default_confidence: int = 55) -> Dict
     }
 
 
+def normalize_attribute_component(raw_component: Any, default_confidence: int = 60) -> Dict[str, Any]:
+    if not isinstance(raw_component, dict):
+        raw_component = {}
+    return {
+        "score": clamp_score(raw_component.get("score"), 50),
+        "confidence": clamp_score(raw_component.get("confidence"), default_confidence),
+        "evidence": unique_text_list(raw_component.get("evidence"), limit=3, max_len=160),
+    }
+
+
+def normalize_attribute_profile(raw_profile: Any, default_confidence: int = 60) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(raw_profile, dict):
+        raw_profile = {}
+    return {
+        dimension: normalize_attribute_component(
+            raw_profile.get(dimension),
+            default_confidence=default_confidence,
+        )
+        for dimension in ATTRIBUTE_DIMENSIONS
+    }
+
+
 def normalize_music_profile(raw_profile: Any) -> Dict[str, List[str]]:
     if not isinstance(raw_profile, dict):
         raw_profile = {}
@@ -460,6 +488,7 @@ def normalize_chunk_report(raw_report: Dict[str, Any]) -> Dict[str, Any]:
             "Часть плейлиста дает смешанный, но читаемый набор сигналов.",
             max_len=400,
         ),
+        "attribute_profile": normalize_attribute_profile(raw_report.get("attribute_profile"), default_confidence=60),
         "music_signals": normalize_music_profile(raw_report.get("music_signals")),
         "big_five": {
             trait: normalize_trait_report(big_five.get(trait), default_confidence=55)
@@ -480,6 +509,10 @@ def normalize_final_profile(raw_report: Dict[str, Any]) -> Dict[str, Any]:
             max_len=600,
         ),
         "overall_confidence": overall_confidence,
+        "attribute_profile": normalize_attribute_profile(
+            raw_report.get("attribute_profile"),
+            default_confidence=overall_confidence,
+        ),
         "big_five": {
             trait: normalize_trait_report(big_five.get(trait), default_confidence=overall_confidence)
             for trait in BIG_FIVE_TRAITS
@@ -785,10 +818,24 @@ def build_chunk_messages(k: int, n: int, chunk: List[Tuple[str, str]]) -> List[d
         f"{bullets}\n\n"
         "Верни только валидный JSON-объект без markdown и без пояснений вне JSON.\n"
         "Не делай финальных выводов по всему плейлисту. Анализируй только эту часть.\n"
+        "Сначала оцени воспринимаемые музыкальные атрибуты, а уже потом делай осторожные личностные гипотезы.\n"
+        "Опирайся не только на жанры, но и на то, как звучит и воспринимается музыка: arousal, valence, depth.\n"
+        "Arousal: от gentle/calming/mellow к intense/thrilling/forceful.\n"
+        "Valence: от sad/depressing к happy/joyful/fun.\n"
+        "Depth: от party/danceable/simple к sophisticated/intelligent/poetic/deep/thoughtful.\n"
+        "Не путай эмоциональный тон части плейлиста с устойчивой чертой личности. "
+        "Грустные, злые или напряженные треки могут отражать саморегуляцию, идентичность или контекст, а не только высокий нейротизм.\n"
+        "Для Big Five используй консервативную калибровку: по умолчанию держи score в диапазоне 30-70 и выходи к крайним значениям "
+        "только если сигналы действительно однородны и многократно повторяются.\n"
         "Если сигнал слабый, снижай confidence. Не выдумывай недоступные факты.\n"
         "Схема JSON:\n"
         "{\n"
         '  "chunk_summary": "1-2 предложения",\n'
+        '  "attribute_profile": {\n'
+        '    "arousal": {"score": 0, "confidence": 0, "evidence": ["до 3 коротких сигналов"]},\n'
+        '    "valence": {"score": 0, "confidence": 0, "evidence": ["до 3 коротких сигналов"]},\n'
+        '    "depth": {"score": 0, "confidence": 0, "evidence": ["до 3 коротких сигналов"]}\n'
+        "  },\n"
         '  "music_signals": {\n'
         '    "genres": ["до 5 пунктов"],\n'
         '    "moods": ["до 5 пунктов"],\n'
@@ -812,7 +859,11 @@ def build_chunk_messages(k: int, n: int, chunk: List[Tuple[str, str]]) -> List[d
             "role": "system",
             "content": (
                 "Ты специалист по музыкальной психографии в парадигме Big Five. "
-                "Работай осторожно, опирайся на повторяющиеся паттерны жанров, настроений, тем и языков. "
+                "Работай в логике Rentfrow & Gosling (2003) и Greenberg et al. (2016): "
+                "сначала оцени устойчивые музыкальные кластеры и воспринимаемые атрибуты, потом делай ограниченные личностные выводы. "
+                "Более сильный вес для personality inference имеют depth и повторяющиеся устойчивые паттерны; "
+                "arousal и valence чаще описывают состояние и функцию слушания, чем стабильную черту. "
+                "Не диагностируй психические состояния и не делай чрезмерно уверенных выводов по отдельным песням. "
                 "Возвращай только JSON."
             ),
         },
@@ -836,10 +887,23 @@ def build_synthesis_messages(partials: List[Dict[str, Any]], scope: AnalysisScop
         "Объедини их в один финальный JSON-объект без markdown.\n"
         "Старайся делать выводы только там, где признаки повторяются между частями. "
         "Если данные неоднородны, это должно снижать overall_confidence.\n"
+        "Собирай вывод в три слоя: "
+        "1) воспринимаемые атрибуты музыки, "
+        "2) эмоциональные состояния и функции плейлиста, "
+        "3) осторожные гипотезы о Big Five.\n"
+        "Не делай прямое равенство между sad/angry/intense музыкой и высоким нейротизмом. "
+        "Используй эмоциональные сигналы прежде всего для эмоционального рисунка и функций плейлиста. "
+        "Для личностных выводов сильнее учитывай depth, устойчивые жанрово-тематические паттерны и повторяемость сигналов.\n"
+        "Держи Big Five в консервативном диапазоне, если нет очень однородного материала.\n"
         "Схема JSON:\n"
         "{\n"
         '  "summary": "3-5 предложений",\n'
         '  "overall_confidence": 0,\n'
+        '  "attribute_profile": {\n'
+        '    "arousal": {"score": 0, "confidence": 0, "evidence": ["до 3 пунктов"]},\n'
+        '    "valence": {"score": 0, "confidence": 0, "evidence": ["до 3 пунктов"]},\n'
+        '    "depth": {"score": 0, "confidence": 0, "evidence": ["до 3 пунктов"]}\n'
+        "  },\n"
         '  "big_five": {\n'
         '    "openness": {"score": 0, "confidence": 0, "evidence": ["до 3 пунктов"]},\n'
         '    "conscientiousness": {"score": 0, "confidence": 0, "evidence": ["до 3 пунктов"]},\n'
@@ -866,6 +930,8 @@ def build_synthesis_messages(partials: List[Dict[str, Any]], scope: AnalysisScop
             "content": (
                 "Ты специалист по музыкальной психографии. "
                 "Собери стабильный итоговый профиль только на основе присланных структурированных chunk-отчетов. "
+                "Сохраняй научную осторожность: музыкальные предпочтения связаны с личностью, но эффект обычно не огромный. "
+                "Не превращай плейлист в псевдодиагноз и не подменяй функцию музыки личностной чертой. "
                 "Возвращай только JSON."
             ),
         },
@@ -892,7 +958,8 @@ def build_compatibility_messages(
         "Сделай психологически аккуратное описание совместимости.\n"
         "Верни только валидный JSON-объект без markdown.\n"
         "Важно: не своди совместимость только к общим трекам. "
-        "Если музыкальный язык, настроение, темы и способ использовать музыку совпадают, это тоже признак близости.\n"
+        "Если музыкальный язык, настроение, темы, воспринимаемые атрибуты и способ использовать музыку совпадают, "
+        "это тоже признак близости.\n"
         "Схема JSON:\n"
         "{\n"
         '  "summary": "3-5 предложений",\n'
@@ -1104,6 +1171,7 @@ async def handle_single_playlist(m: Message, user: str, kind: int):
         await m.answer(format_analysis_scope_notice(scope), parse_mode=None)
 
     await m.answer("Минуту, запускаю психографический анализ...")
+    await m.answer(build_ad_message(), parse_mode=None)
     analysis = await asyncio.to_thread(analyze_full_playlist_all_tracks, tracks)
     log_event(m.from_user.id, "analysis_done")
     await send_long(m, analysis.text, parse_mode=None)
@@ -1143,6 +1211,7 @@ async def handle_compare_playlists(
         await send_long(m, "\n".join(truncation_notes), parse_mode=None)
 
     await m.answer("Строю сводку совместимости по вкусам и психологическому портрету...")
+    await m.answer(build_ad_message(), parse_mode=None)
     compatibility = await asyncio.to_thread(analyze_compatibility, tracks_a, tracks_b)
     log_event(m.from_user.id, "compat_done")
     await send_long(m, compatibility, parse_mode=None)

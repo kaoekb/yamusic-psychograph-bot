@@ -15,14 +15,18 @@ AD_TEXT = os.getenv(
 )
 AD_LINK = os.getenv("AD_LINK", "")  # можно указать лендинг/форму
 
+
+def build_ad_message() -> str:
+    text = AD_TEXT.format(contact=AD_CONTACT)
+    if AD_LINK:
+        text += f"\nПодробнее: {AD_LINK}"
+    return text
+
 @router.message(Command("reklama"))
 async def on_reklama(m: Message):
     upsert_user(m.from_user)
     log_event(m.from_user.id, "ad")
-    text = AD_TEXT.format(contact=AD_CONTACT)
-    if AD_LINK:
-        text += f"\nПодробнее: {AD_LINK}"
-    await m.answer(text, parse_mode=None)
+    await m.answer(build_ad_message(), parse_mode=None)
 
 # Кириллический «алиас»: Telegram-команды официально латиницей,
 # поэтому ловим текстом "/реклама" или просто "реклама".
